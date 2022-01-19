@@ -66,7 +66,7 @@ def sr_resnet(num_filters=64, num_res_blocks=16):
     return Model(x_in, x)
 
 
-def residual_dense_block_orignal(input, filters):
+def residual_dense_block(input, filters):
     x1 = Conv2D(filters=filters, kernel_size=3,
                 strides=1, padding='same')(input)
     x1 = LeakyReLU(0.2)(x1)
@@ -89,30 +89,6 @@ def residual_dense_block_orignal(input, filters):
     x = Add()([x5, input])
 
     return x
-
-def residual_dense_block(input, filters):
-    x1 = sep_bn(x=input, filters=filters, kernel_size=3, strides=1)
-    x1 = LeakyReLU(0.2)(x1)
-    x1 = Concatenate()([input, x1])
-
-    x2 = sep_bn(x=x1, filters=filters, kernel_size=3, strides=1)
-    x2 = LeakyReLU(0.2)(x2)
-    x2 = Concatenate()([input, x1, x2])
-
-    x3 = sep_bn(x=x2, filters=filters, kernel_size=3, strides=1)
-    x3 = LeakyReLU(0.2)(x3)
-    x3 = Concatenate()([input, x1, x2, x3])
-
-    x4 = sep_bn(x=x3, filters=filters, kernel_size=3, strides=1)
-    x4 = LeakyReLU(0.2)(x4)
-    x4 = Concatenate()([input, x1, x2, x3, x4])
-
-    x5 = sep_bn(x=x4, filters=filters, kernel_size=3, strides=1)
-    x5 = Lambda(lambda x: x * 0.2)(x5)
-    x = Add()([x5, input])
-
-    return x
-
 
 def rrdb(input, filters):
     x = residual_dense_block(input, filters)
