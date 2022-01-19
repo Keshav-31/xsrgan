@@ -36,7 +36,7 @@ def res_block(x_in, num_filters, momentum=0.8):
 
 
 
-def sr_resnet(num_filters=64, num_res_blocks=32):
+def sr_resnet(num_filters=64, num_res_blocks=16):
     x_in = Input(shape=(None, None, 3))
     x = Lambda(normalize_01)(x_in)
 
