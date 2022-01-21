@@ -2,7 +2,7 @@ import time
 import tensorflow as tf
 
 from model import evaluate
-from model import srgan
+from model import xsrgan
 
 from tensorflow.keras.applications.vgg19 import preprocess_input
 from tensorflow.keras.losses import BinaryCrossentropy
@@ -126,7 +126,7 @@ class WdsrTrainer(Trainer):
         super().train(train_dataset, valid_dataset, steps, evaluate_every, save_best_only)
 
 
-class SrganGeneratorTrainer(Trainer):
+class XSrganGeneratorTrainer(Trainer):
     def __init__(self,
                  model,
                  checkpoint_dir,
@@ -138,7 +138,7 @@ class SrganGeneratorTrainer(Trainer):
         super().train(train_dataset, valid_dataset, steps, evaluate_every, save_best_only)
 
 
-class SrganTrainer:
+class XSrganTrainer:
     #
     # TODO: model and optimizer checkpoints
     #
@@ -146,41 +146,72 @@ class SrganTrainer:
                  generator,
                  discriminator,
                  content_loss='VGG54',
-                 learning_rate=PiecewiseConstantDecay(boundaries=[1000], values=[1e-4, 1e-5])):
+                 learning_rate=PiecewiseConstantDecay(boundaries=[1000], values=[1e-4, 1e-5]),
+                 checkpoint_dir = './ckpt/xsrgan'):
+
+        self.now = None
 
         if content_loss == 'VGG22':
-            self.vgg = srgan.vgg_22()
+            self.vgg = xsrgan.vgg_22()
         elif content_loss == 'VGG54':
-            self.vgg = srgan.vgg_54()
+            self.vgg = xsrgan.vgg_54()
         else:
             raise ValueError("content_loss must be either 'VGG22' or 'VGG54'")
 
         self.content_loss = content_loss
-        self.generator = generator
-        self.discriminator = discriminator
-        self.generator_optimizer = Adam(learning_rate=learning_rate)
-        self.discriminator_optimizer = Adam(learning_rate=learning_rate)
+        
+        self.checkpoint = tf.train.Checkpoint(step=tf.Variable(0),
+                                              gen_loss=tf.Variable(-1.0),
+                                              disc_loss=tf.Variable(-1.0),
+                                              generator_optimizer = Adam(learning_rate=learning_rate),
+                                              discriminator_optimizer = Adam(learning_rate=learning_rate),
+                                              generator = generator,
+                                              discriminator = discriminator)
+
+        self.checkpoint_manager = tf.train.CheckpointManager(checkpoint=self.checkpoint,
+                                                             directory=checkpoint_dir,
+                                                             max_to_keep=3)
+        
+        self.restore()
+
+        # self.generator = generator
+        # self.discriminator = discriminator
+        # self.generator_optimizer = Adam(learning_rate=learning_rate)
+        # self.discriminator_optimizer = Adam(learning_rate=learning_rate)
 
         self.binary_cross_entropy = BinaryCrossentropy(from_logits=False)
         self.mean_squared_error = MeanSquaredError()
         self.mean_absolute_error = MeanAbsoluteError()
 
-    def train(self, train_dataset, steps=200000):
+    @property
+    def generator(self):
+        return self.checkpoint.generator
+    
+    @property
+    def discriminator(self):
+        return self.checkpoint.discriminator
+
+    def train(self, train_dataset, evaluate_every=20, steps=200000):
         pls_metric = Mean()
         dls_metric = Mean()
-        step = 0
+        
+        ckpt_mgr = self.checkpoint_manager
+        ckpt = self.checkpoint
+
+        self.now = time.perf_counter()
 
         gan_writer = tf.summary.create_file_writer('logs/xsrgan')
 
         with gan_writer.as_default():
-            for lr, hr in train_dataset.take(steps):
-                step += 1
+            for lr, hr in train_dataset.take(steps-ckpt.step.numpy()):
+                ckpt.step.assign_add(1)
+                step = ckpt.step.numpy()
 
                 pl, dl, gl, cl = self.train_step(lr, hr)
                 pls_metric(pl)
                 dls_metric(dl)
 
-                if step % 10 == 0:
+                if step % evaluate_every == 0:
                     tf.summary.scalar('Perceptual Loss', pl, step=tf.cast(step, tf.int64))
                     tf.summary.scalar('Discriminator Loss', dl, step=tf.cast(step, tf.int64))
                     tf.summary.scalar('Generator Loss', gl, step=tf.cast(step, tf.int64))
@@ -191,16 +222,22 @@ class SrganTrainer:
                     pls_metric.reset_states()
                     dls_metric.reset_states()
 
+                    ckpt.gen_loss = gl
+                    ckpt.disc_loss = dl
+
+                    ckpt_mgr.save()
+
+
     @tf.function
     def train_step(self, lr, hr):
         with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
             lr = tf.cast(lr, tf.float32)
             hr = tf.cast(hr, tf.float32)
 
-            sr = self.generator(lr, training=True)
+            sr = self.checkpoint.generator(lr, training=True)
 
-            hr_output = self.discriminator(hr, training=True)
-            sr_output = self.discriminator(sr, training=True)
+            hr_output = self.checkpoint.discriminator(hr, training=True)
+            sr_output = self.checkpoint.discriminator(sr, training=True)
 
             con_loss = self._content_loss(hr, sr)
             gen_loss = self._generator_loss(sr_output)
@@ -208,17 +245,24 @@ class SrganTrainer:
             disc_loss = self._discriminator_loss(hr_output, sr_output)
 
         gradients_of_generator = gen_tape.gradient(
-            perc_loss, self.generator.trainable_variables)
+            perc_loss, self.checkpoint.generator.trainable_variables)
         gradients_of_discriminator = disc_tape.gradient(
-            disc_loss, self.discriminator.trainable_variables)
+            disc_loss, self.checkpoint.discriminator.trainable_variables)
 
-        self.generator_optimizer.apply_gradients(
-            zip(gradients_of_generator, self.generator.trainable_variables))
-        self.discriminator_optimizer.apply_gradients(
-            zip(gradients_of_discriminator, self.discriminator.trainable_variables))
+        self.checkpoint.generator_optimizer.apply_gradients(
+            zip(gradients_of_generator, self.checkpoint.generator.trainable_variables))
+        self.checkpoint.discriminator_optimizer.apply_gradients(
+            zip(gradients_of_discriminator, self.checkpoint.discriminator.trainable_variables))
 
-        return perc_loss, disc_loss
+        return perc_loss, disc_loss, gen_loss, con_loss
 
+    def restore(self):
+        if self.checkpoint_manager.latest_checkpoint:
+            self.checkpoint.restore(self.checkpoint_manager.latest_checkpoint)
+            print(f'Model restored from checkpoint at step {self.checkpoint.step.numpy()}.')
+        else:
+            print('Training Model from Scratch')
+    
     @tf.function
     def _content_loss(self, hr, sr):
         sr = preprocess_input(sr)
