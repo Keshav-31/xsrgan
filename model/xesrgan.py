@@ -90,6 +90,7 @@ def residual_dense_block_orignal(input, filters):
 
     return x
 
+
 def residual_dense_block(input, filters):
     x1 = sep_bn(x=input, filters=filters, kernel_size=3, strides=1)
     x1 = LeakyReLU(0.2)(x1)
@@ -230,6 +231,22 @@ def _vgg(output_layer):
     vgg = VGG19(input_shape=(None, None, 3),
                 include_top=False, weights='imagenet')
     return Model(vgg.input, vgg.layers[output_layer].output)
+
+
+def VGG_partial(i_m=5, j_m=4):
+    i, j = 1, 0
+    accumulated_loss = 0.0
+    for l in VGG19.layers:
+        cl_name = l.__class__.__name__
+        if cl_name == 'Conv2D':
+            j += 1
+        if cl_name == 'MaxPooling2D':
+            i += 1
+            j = 0
+        if i == i_m and j == j_m and cl_name == 'Conv2D':
+            before_act_output = tf.nn.convolution(
+                l.input, l.weights[0], padding='SAME') + l.weights[1]
+            return tf.keras.models.Model(VGG19.input, before_act_output)
 
 
 # print(discriminator().summary())
