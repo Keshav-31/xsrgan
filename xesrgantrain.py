@@ -11,6 +11,7 @@ from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.metrics import Mean
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.optimizers.schedules import PiecewiseConstantDecay
+tf.compat.v1.enable_eager_execution()
 
 
 class Trainer:
@@ -59,8 +60,10 @@ class Trainer:
 
                     # Compute PSNR on validation dataset
                     psnr_value = self.evaluate(valid_dataset)
-                    tf.summary.scalar('MSE Loss', loss_value, step=tf.cast(step, tf.int64))
-                    tf.summary.scalar('PSNR', psnr_value, step=tf.cast(step, tf.int64))
+                    tf.summary.scalar('MSE Loss', loss_value,
+                                      step=tf.cast(step, tf.int64))
+                    tf.summary.scalar('PSNR', psnr_value,
+                                      step=tf.cast(step, tf.int64))
                     duration = time.perf_counter() - self.now
                     pre_writer.flush()
                     print(
@@ -75,9 +78,8 @@ class Trainer:
                     ckpt_mgr.save()
 
                     self.now = time.perf_counter()
-            
 
-    @tf.function
+    # @tf.function
     def train_step(self, lr, hr):
         with tf.GradientTape() as tape:
             lr = tf.cast(lr, tf.float32)
@@ -147,32 +149,36 @@ class XESrganTrainer:
                  generator,
                  discriminator,
                  content_loss='VGG54',
-                 learning_rate=PiecewiseConstantDecay(boundaries=[1000], values=[1e-4, 1e-5]),
-                 checkpoint_dir = './ckpt/xesrgan'):
+                 learning_rate=PiecewiseConstantDecay(
+                     boundaries=[1000], values=[1e-4, 1e-5]),
+                 checkpoint_dir='./ckpt/xesrgan'):
 
         self.now = None
 
-        if content_loss == 'VGG22':
-            self.vgg = xesrgan.vgg_22()
-        elif content_loss == 'VGG54':
-            self.vgg = xesrgan.vgg_54()
-        else:
-            raise ValueError("content_loss must be either 'VGG22' or 'VGG54'")
-
+        # if content_loss == 'VGG22':
+        #     self.vgg = xesrgan.vgg_22()
+        # elif content_loss == 'VGG54':
+        #     self.vgg = xesrgan.vgg_54()
+        # else:
+        #     raise ValueError("content_loss must be either 'VGG22' or 'VGG54'")
+        # self.vgg = xesrgan.VGG_partial()
+        # print(self.vgg)
         self.content_loss = content_loss
-        
+
         self.checkpoint = tf.train.Checkpoint(step=tf.Variable(0),
                                               gen_loss=tf.Variable(-1.0),
                                               disc_loss=tf.Variable(-1.0),
-                                              generator_optimizer = Adam(learning_rate=learning_rate),
-                                              discriminator_optimizer = Adam(learning_rate=learning_rate),
-                                              generator = generator,
-                                              discriminator = discriminator)
+                                              generator_optimizer=Adam(
+                                                  learning_rate=learning_rate),
+                                              discriminator_optimizer=Adam(
+                                                  learning_rate=learning_rate),
+                                              generator=generator,
+                                              discriminator=discriminator)
 
         self.checkpoint_manager = tf.train.CheckpointManager(checkpoint=self.checkpoint,
                                                              directory=checkpoint_dir,
                                                              max_to_keep=3)
-        
+
         self.restore()
 
         # self.generator = generator
@@ -187,7 +193,7 @@ class XESrganTrainer:
     @property
     def generator(self):
         return self.checkpoint.generator
-    
+
     @property
     def discriminator(self):
         return self.checkpoint.discriminator
@@ -195,7 +201,7 @@ class XESrganTrainer:
     def train(self, train_dataset, evaluate_every=20, steps=200000):
         pls_metric = Mean()
         dls_metric = Mean()
-        
+
         ckpt_mgr = self.checkpoint_manager
         ckpt = self.checkpoint
 
@@ -213,10 +219,14 @@ class XESrganTrainer:
                 dls_metric(dl)
 
                 if step % evaluate_every == 0:
-                    tf.summary.scalar('Perceptual Loss', pl, step=tf.cast(step, tf.int64))
-                    tf.summary.scalar('Discriminator Loss', dl, step=tf.cast(step, tf.int64))
-                    tf.summary.scalar('Generator Loss', gl, step=tf.cast(step, tf.int64))
-                    tf.summary.scalar('Content Loss', cl, step=tf.cast(step, tf.int64))
+                    tf.summary.scalar('Perceptual Loss', pl,
+                                      step=tf.cast(step, tf.int64))
+                    tf.summary.scalar('Discriminator Loss',
+                                      dl, step=tf.cast(step, tf.int64))
+                    tf.summary.scalar('Generator Loss', gl,
+                                      step=tf.cast(step, tf.int64))
+                    tf.summary.scalar('Content Loss', cl,
+                                      step=tf.cast(step, tf.int64))
                     gan_writer.flush()
                     print(
                         f'{step}/{steps}, perceptual loss = {pls_metric.result():.4f}, discriminator loss = {dls_metric.result():.4f}')
@@ -228,8 +238,7 @@ class XESrganTrainer:
 
                     ckpt_mgr.save()
 
-
-    @tf.function
+    # @tf.function
     def train_step(self, lr, hr):
         with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
             lr = tf.cast(lr, tf.float32)
@@ -265,20 +274,24 @@ class XESrganTrainer:
     def restore(self):
         if self.checkpoint_manager.latest_checkpoint:
             self.checkpoint.restore(self.checkpoint_manager.latest_checkpoint)
-            print(f'Model restored from checkpoint at step {self.checkpoint.step.numpy()}.')
+            print(
+                f'Model restored from checkpoint at step {self.checkpoint.step.numpy()}.')
         else:
             print('Training Model from Scratch')
 
-
-    @tf.function
+    # @tf.function
     def _content_loss(self, hr, sr):
+        # print(sr)
         sr = preprocess_input(sr)
         hr = preprocess_input(hr)
-        sr_features = self.vgg(sr) / 12.75
-        hr_features = self.vgg(hr) / 12.75
-        return self.mean_squared_error(hr_features, sr_features)
+        # sr = sr.numpy()
+        # hr = hr.numpy()
+        loss = xesrgan.VGG_LOSS(sr,hr)
+        # sr_features = self.vgg(sr) / 12.75
+        # hr_features = self.vgg(hr) / 12.75
+        # return self.mean_squared_error(hr_features, sr_features)
         # return self.mean_absolute_error(hr_features, sr_features)
-
+        return loss
     def _generator_loss(self, sr_out):
         return self.binary_cross_entropy(tf.ones_like(sr_out), sr_out)
 
