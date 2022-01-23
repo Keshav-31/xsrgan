@@ -7,6 +7,7 @@ from tensorflow.python.data.experimental import AUTOTUNE
 class DIV2K:
     def __init__(self,
                  scale=2,
+                 hr_size = 256,
                  subset='train',
                  downgrade='bicubic',
                  images_dir='.div2k/images',
@@ -20,6 +21,8 @@ class DIV2K:
             self.scale = scale
         else:
             raise ValueError(f'scale must be in ${_scales}')
+        
+        self.hr_size = hr_size
 
         if subset == 'train':
             self.image_ids = range(1, 801)
@@ -58,7 +61,7 @@ class DIV2K:
     def dataset(self, batch_size=16, repeat_count=None, random_transform=True):
         ds = tf.data.Dataset.zip((self.lr_dataset(), self.hr_dataset()))
         if random_transform:
-            ds = ds.map(lambda lr, hr: random_crop(lr, hr, scale=self.scale), num_parallel_calls=AUTOTUNE)
+            ds = ds.map(lambda lr, hr: random_crop(lr, hr, hr_crop_size=self.hr_size ,scale=self.scale), num_parallel_calls=AUTOTUNE)
             ds = ds.map(random_rotate, num_parallel_calls=AUTOTUNE)
             ds = ds.map(random_flip, num_parallel_calls=AUTOTUNE)
         ds = ds.batch(batch_size)
@@ -151,7 +154,7 @@ class DIV2K:
 # -----------------------------------------------------------
 
 
-def random_crop(lr_img, hr_img, hr_crop_size=96, scale=2):
+def random_crop(lr_img, hr_img, hr_crop_size=256, scale=2):
     lr_crop_size = hr_crop_size // scale
     lr_img_shape = tf.shape(lr_img)[:2]
 
