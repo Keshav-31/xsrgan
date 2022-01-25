@@ -180,7 +180,10 @@ class ESrganTrainer:
         # self.generator_optimizer = Adam(learning_rate=learning_rate)
         # self.discriminator_optimizer = Adam(learning_rate=learning_rate)
 
-        self.binary_cross_entropy = BinaryCrossentropy(from_logits=False)
+        self.gen_weight = 0.005
+        self.l1_weight =  0.01
+
+        self.binary_cross_entropy = BinaryCrossentropy(from_logits=True)
         self.mean_squared_error = MeanSquaredError()
         self.mean_absolute_error = MeanAbsoluteError()
 
@@ -240,14 +243,19 @@ class ESrganTrainer:
             hr_output = self.checkpoint.discriminator(hr, training=True)
             sr_output = self.checkpoint.discriminator(sr, training=True)
 
+            pixel_loss = self._pixelwise_loss(hr, sr)
             con_loss = self._content_loss(hr, sr)
-            gen_loss = self._generator_loss(sr_output)
+            gen_loss = self._generator_loss(hr_output, sr_output)
+            
             # Calculate LPIPS Similarity
             # loss_fn_alex = lpips.LPIPS(net='alex')
             # lpips_loss = loss_fn_alex.forward(
             #     hr, sr)  # Calculate LPIPS Similarity
-            perc_loss = 1.5*con_loss + 0.001 * gen_loss
+            
+            perc_loss = con_loss + self.gen_weight * gen_loss + self.l1_weight * pixel_loss
+
             disc_loss = self._discriminator_loss(hr_output, sr_output)
+            
             # disc_loss = self._discriminator_loss_ragan(hr_output, sr_output)
 
         gradients_of_generator = gen_tape.gradient(
@@ -279,13 +287,25 @@ class ESrganTrainer:
         return self.mean_squared_error(hr_features, sr_features)
         # return self.mean_absolute_error(hr_features, sr_features)
 
-    def _generator_loss(self, sr_out):
-        return self.binary_cross_entropy(tf.ones_like(sr_out), sr_out)
+    def _pixelwise_loss(self, hr, sr):
+        return self.mean_absolute_error(hr, sr)
+
+    def _generator_loss(self, hr_out, sr_out):
+        sigma = tf.sigmoid
+        hr_loss = sigma(hr_out - tf.reduce_mean(sr_out))
+        sr_loss = sigma(sr_out - tf.reduce_mean(hr_out))
+        return 0.5 * (
+            self.binary_cross_entropy(tf.ones_like(sr_loss), sr_loss) +
+            self.binary_cross_entropy(tf.zeros_like(hr_loss), hr_loss))
+        # return self.binary_cross_entropy(tf.ones_like(sr_out), sr_out)
 
     def _discriminator_loss(self, hr_out, sr_out):
-        hr_loss = self.binary_cross_entropy(tf.ones_like(hr_out), hr_out)
-        sr_loss = self.binary_cross_entropy(tf.zeros_like(sr_out), sr_out)
-        return hr_loss + sr_loss
+        sigma = tf.sigmoid
+        hr_loss = sigma(hr_out - tf.reduce_mean(sr_out))
+        sr_loss = sigma(sr_out - tf.reduce_mean(hr_out))
+
+        return 0.5 * (self.binary_cross_entropy(tf.ones_like(hr_loss), hr_loss) + self.binary_cross_entropy(tf.zeros_like(sr_loss), sr_loss))
+        
 
     # def _discriminator_loss_ragan(self, real_discriminator_logits, fake_discriminator_logits):
     #     sigma = tf.sigmoid

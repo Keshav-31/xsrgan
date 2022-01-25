@@ -1,3 +1,4 @@
+from sqlalchemy import false
 from tensorflow.python.keras.applications import mobilenet_v2
 from tensorflow.python.keras.layers import Add, BatchNormalization, Conv2D, Dense, Flatten, Input, LeakyReLU, PReLU, Lambda, SeparableConv2D, Concatenate
 from tensorflow.python.keras.layers.core import Dropout
@@ -149,8 +150,8 @@ def discriminator_block(x_in, num_filters, strides=1, batchnorm=True, momentum=0
     return LeakyReLU(alpha=0.2)(x)
 
 
-def discriminator(num_filters=64):
-    x_in = Input(shape=(HR_SIZE, HR_SIZE, 3))
+def discriminator(hr_size = HR_SIZE, num_filters=64):
+    x_in = Input(shape=(hr_size, hr_size, 3))
     x = Lambda(normalize_m11)(x_in)
 
     x = discriminator_block(x, num_filters, batchnorm=False)
@@ -205,7 +206,14 @@ def vgg_54():
 def _vgg(output_layer):
     vgg = VGG19(input_shape=(None, None, 3),
                 include_top=False, weights='imagenet')
-    return Model(vgg.input, vgg.layers[output_layer].output)
+
+    vgg.layers[output_layer].activation = None
+    
+    con_loss = Model(vgg.input, vgg.layers[output_layer].output)
+    
+    con_loss.trainable = False
+    
+    return con_loss
 
 
 # print(discriminator().summary())
