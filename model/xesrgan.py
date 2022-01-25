@@ -1,10 +1,6 @@
-from tensorflow.python.keras.applications import mobilenet_v2
 from tensorflow.python.keras.layers import Add, BatchNormalization, Conv2D, Dense, Flatten, Input, LeakyReLU, PReLU, Lambda, SeparableConv2D, Concatenate
-from tensorflow.python.keras.layers.core import Dropout
-from tensorflow.python.keras.layers.pooling import MaxPooling2D
+
 from tensorflow.python.keras.models import Model
-from tensorflow.python.keras.applications.vgg19 import VGG19
-from tensorflow.python.keras.applications.mobilenet_v2 import MobileNetV2
 import tensorflow.keras.backend as K
 from tensorflow.keras.losses import MeanSquaredError , MeanAbsoluteError
 
@@ -234,25 +230,26 @@ def discriminator(num_filters=64):
 #     vgg = VGG19(input_shape=(None, None, 3),
 #                 include_top=False, weights='imagenet')
 #     return Model(vgg.input, vgg.layers[output_layer].output)
-def VGG_LOSS(img1, img2,loss_type = "MSE"):
-    vgg = tf.keras.applications.VGG19(
+
+vgg = tf.keras.applications.VGG19(
         weights='imagenet', include_top=False, input_shape=(None, None, 3))
+
+def VGG_LOSS(img1, img2):
 
     model = vgg
     input_data1 = img1
     input_data2 = img2
-    if(loss_type == 'MSE'):
-        loss_func = MeanSquaredError()
-    else :
-        loss_func = MeanAbsoluteError()
+    mse = MeanSquaredError()
+
     total_loss = 0
     for layerIndex, layer in enumerate(model.layers):
         func = K.function([model.get_layer(index=0).input], layer.output)
-        # print(layer)
-        out1 = func([input_data1])  # input_data is a numpy array
-        out2 = func([input_data2])
-        err = loss_func(out1,out2)
-        total_loss = total_loss + err
+        # print(layer.name)
+        if("conv" in layer.name):
+            out1 = func([input_data1])  # input_data is a numpy array
+            out2 = func([input_data2])
+            err = mse(out1,out2)
+            total_loss = total_loss + err
     # print(total_loss)
     return total_loss
 
