@@ -11,6 +11,9 @@ from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.metrics import Mean
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.optimizers.schedules import PiecewiseConstantDecay
+import lpips
+import torch
+
 tf.compat.v1.enable_eager_execution()
 
 
@@ -131,12 +134,13 @@ class XESrganTrainer:
 
         self.now = None
 
-        # if content_loss == 'VGG22':
-        #     self.vgg = xesrgan.vgg_22()
-        # elif content_loss == 'VGG54':
-        #     self.vgg = xesrgan.vgg_54()
-        # else:
-        #     raise ValueError("content_loss must be either 'VGG22' or 'VGG54'")
+        if content_loss == 'VGG22':
+            self.vgg = xesrgan.vgg_22()
+        elif content_loss == 'VGG54':
+            self.vgg = xesrgan.vgg_54()
+        else:
+            raise ValueError("content_loss must be either 'VGG22' or 'VGG54'")
+        self.loss_fn_alex = lpips.LPIPS(net='alex')
         # self.vgg = xesrgan.VGG_partial()
         # print(self.vgg)
         self.content_loss = content_loss
@@ -227,11 +231,11 @@ class XESrganTrainer:
 
             con_loss = self._content_loss(hr, sr)
             gen_loss = self._generator_loss(sr_output)
-            # Calculate LPIPS Similarity
-            # loss_fn_alex = lpips.LPIPS(net='alex')
-            # lpips_loss = loss_fn_alex.forward(
-            #     hr, sr)  # Calculate LPIPS Similarity
-            perc_loss = 1.5*con_loss + 0.001 * gen_loss
+            print(con_loss)
+            print(gen_loss)
+            lpips_loss = self._lpips_loss(hr,sr)
+            print(lpips_loss)
+            perc_loss = 1.5*con_loss - lpips_loss + 0.001 * gen_loss
             disc_loss = self._discriminator_loss(hr_output, sr_output)
             # disc_loss = self._discriminator_loss_ragan(hr_output, sr_output)
 
@@ -255,18 +259,39 @@ class XESrganTrainer:
         else:
             print('Training Model from Scratch')
 
-    # @tf.function
+    @tf.function
     def _content_loss(self, hr, sr):
         # print(sr)
         sr = preprocess_input(sr)
         hr = preprocess_input(hr)
         # sr = sr.numpy()
         # hr = hr.numpy()
-        loss = xesrgan.VGG_LOSS(sr,hr)
-        # sr_features = self.vgg(sr) / 12.75
-        # hr_features = self.vgg(hr) / 12.75
-        # return self.mean_squared_error(hr_features, sr_features)
+        # loss = xesrgan.VGG_LOSS(sr,hr)
+        sr_features = self.vgg(sr) / 12.75
+        hr_features = self.vgg(hr) / 12.75
+        return self.mean_squared_error(hr_features, sr_features)
         # return self.mean_absolute_error(hr_features, sr_features)
+    def _lpips_loss(self, hr, sr):
+        sum_LPIPS, num_images = 0, 0
+        # hr = tf.image.resize(
+        #     hr, (sr.shape[0], sr.shape[1]), method=tf.image.ResizeMethod.BICUBIC)
+        # sr, hr = tf.expand_dims(tf.transpose(sr, [2, 0, 1]), axis=0), tf.expand_dims(
+        #     tf.transpose(hr, [2, 0, 1]), axis=0)
+        # print(hr,sr)
+        # print(hr.shape,sr.shape)
+
+        sr = tf.transpose(sr,[0,3,1,2])
+        hr = tf.transpose(hr,[0,3,1,2])
+        # Calculate LPIPS Similarity
+        sum_LPIPS += self.loss_fn_alex.forward(torch.Tensor(hr.numpy()),
+                                            torch.Tensor(sr.numpy()))
+        num_images += 1
+        # print(sum_LPIPS)
+        loss =  sum_LPIPS / num_images
+        loss = loss.detach().numpy()
+        # print(loss)
+        loss = tf.reshape(loss,[])
+        # print(loss)
         return loss
     def _generator_loss(self, sr_out):
         return self.binary_cross_entropy(tf.ones_like(sr_out), sr_out)

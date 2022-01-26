@@ -6,6 +6,7 @@ from tensorflow.keras.losses import MeanSquaredError , MeanAbsoluteError
 
 import tensorflow as tf
 from model.common import pixel_shuffle, normalize_01, normalize_m11, denormalize_m11
+from tensorflow.keras.applications import VGG19
 
 LR_SIZE = 64
 HR_SIZE = 256
@@ -218,40 +219,40 @@ def discriminator(num_filters=64):
 #     return model
 
 
-# def vgg_22():
-#     return _vgg(5)
+def vgg_22():
+    return _vgg(5)
 
 
-# def vgg_54():
-#     return _vgg(20)
+def vgg_54():
+    return _vgg(20)
 
 
-# def _vgg(output_layer):
-#     vgg = VGG19(input_shape=(None, None, 3),
-#                 include_top=False, weights='imagenet')
-#     return Model(vgg.input, vgg.layers[output_layer].output)
+def _vgg(output_layer):
+    vgg = VGG19(input_shape=(None, None, 3),
+                include_top=False, weights='imagenet')
+    return Model(vgg.input, vgg.layers[output_layer].output)
 
-vgg = tf.keras.applications.VGG19(
-        weights='imagenet', include_top=False, input_shape=(None, None, 3))
+# vgg = tf.keras.applications.VGG19(
+#         weights='imagenet', include_top=False, input_shape=(None, None, 3))
 
-def VGG_LOSS(img1, img2):
+# def VGG_LOSS(img1, img2):
 
-    model = vgg
-    input_data1 = img1
-    input_data2 = img2
-    mse = MeanSquaredError()
+#     model = vgg
+#     input_data1 = img1
+#     input_data2 = img2
+#     mse = MeanSquaredError()
 
-    total_loss = 0
-    for layerIndex, layer in enumerate(model.layers):
-        func = K.function([model.get_layer(index=0).input], layer.output)
-        # print(layer.name)
-        if("conv" in layer.name):
-            out1 = func([input_data1])  # input_data is a numpy array
-            out2 = func([input_data2])
-            err = mse(out1,out2)
-            total_loss = total_loss + err
-    # print(total_loss)
-    return total_loss
+#     total_loss = 0
+#     for layerIndex, layer in enumerate(model.layers):
+#         func = K.function([model.get_layer(index=0).input], layer.output)
+#         # print(layer.name)
+#         if("conv" in layer.name):
+#             out1 = func([input_data1])  # input_data is a numpy array
+#             out2 = func([input_data2])
+#             err = mse(out1,out2)
+#             total_loss = total_loss + err
+#     # print(total_loss)
+#     return total_loss
 
 
 # def VGG_partial(i_m=5, j_m=4):
