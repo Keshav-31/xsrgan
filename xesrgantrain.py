@@ -14,7 +14,7 @@ from tensorflow.keras.optimizers.schedules import PiecewiseConstantDecay
 import lpips
 import torch
 
-tf.compat.v1.enable_eager_execution()
+# tf.compat.v1.enable_eager_execution()
 
 
 class Trainer:
@@ -231,11 +231,13 @@ class XESrganTrainer:
 
             con_loss = self._content_loss(hr, sr)
             gen_loss = self._generator_loss(sr_output)
-            print(con_loss)
-            print(gen_loss)
+            # print(con_loss)
+            # print(gen_loss)
             lpips_loss = self._lpips_loss(hr,sr)
-            print(lpips_loss)
-            perc_loss = 1.5*con_loss - lpips_loss + 0.001 * gen_loss
+            # print(lpips_loss)
+            # perc_loss = 1.5*con_loss + 0.001 * gen_loss
+
+            perc_loss = 1.5*con_loss + lpips_loss + 0.001 * gen_loss
             disc_loss = self._discriminator_loss(hr_output, sr_output)
             # disc_loss = self._discriminator_loss_ragan(hr_output, sr_output)
 
@@ -259,7 +261,7 @@ class XESrganTrainer:
         else:
             print('Training Model from Scratch')
 
-    @tf.function
+    # @tf.function
     def _content_loss(self, hr, sr):
         # print(sr)
         sr = preprocess_input(sr)
