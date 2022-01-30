@@ -12,6 +12,9 @@ from tensorflow.keras.metrics import Mean
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.optimizers.schedules import PiecewiseConstantDecay
 
+import lpips
+import torch
+
 
 class Trainer:
     def __init__(self,
@@ -103,30 +106,6 @@ class Trainer:
                 f'Model restored from checkpoint at step {self.checkpoint.step.numpy()}.')
 
 
-class EdsrTrainer(Trainer):
-    def __init__(self,
-                 model,
-                 checkpoint_dir,
-                 learning_rate=PiecewiseConstantDecay(boundaries=[200000], values=[1e-4, 5e-5])):
-        super().__init__(model, loss=MeanAbsoluteError(),
-                         learning_rate=learning_rate, checkpoint_dir=checkpoint_dir)
-
-    def train(self, train_dataset, valid_dataset, steps=300000, evaluate_every=1000, save_best_only=True):
-        super().train(train_dataset, valid_dataset, steps, evaluate_every, save_best_only)
-
-
-class WdsrTrainer(Trainer):
-    def __init__(self,
-                 model,
-                 checkpoint_dir,
-                 learning_rate=PiecewiseConstantDecay(boundaries=[200000], values=[1e-3, 5e-4])):
-        super().__init__(model, loss=MeanAbsoluteError(),
-                         learning_rate=learning_rate, checkpoint_dir=checkpoint_dir)
-
-    def train(self, train_dataset, valid_dataset, steps=300000, evaluate_every=1000, save_best_only=True):
-        super().train(train_dataset, valid_dataset, steps, evaluate_every, save_best_only)
-
-
 class SXESrganGeneratorTrainer(Trainer):
     def __init__(self,
                  model,
@@ -148,9 +127,14 @@ class SXESrganTrainer:
                  discriminator,
                  content_loss='VGG54',
                  learning_rate=PiecewiseConstantDecay(boundaries=[1000], values=[1e-4, 1e-5]),
-                 checkpoint_dir = './ckpt/sxesrgan'):
+                 checkpoint_dir = './ckpt/sxesrgan',
+                 disc_type = 'ragan',
+                 loss_type = 'pixel'):
 
         self.now = None
+        self.disc = disc_type
+        self.loss_type = loss_type
+        self.loss_fn_alex = lpips.LPIPS(net='alex')
 
         if content_loss == 'VGG22':
             self.vgg = sxesrgan.vgg_22()
@@ -181,7 +165,7 @@ class SXESrganTrainer:
         # self.discriminator_optimizer = Adam(learning_rate=learning_rate)
 
         self.gen_weight = 0.005
-        self.l1_weight =  0.01
+        self.l1_weight =  0.01 if (self.loss_type=='pixel') else 0.1
 
         self.binary_cross_entropy = BinaryCrossentropy(from_logits=True)
         self.mean_squared_error = MeanSquaredError()
@@ -232,7 +216,7 @@ class SXESrganTrainer:
                     ckpt_mgr.save()
 
 
-    @tf.function
+    #@tf.function
     def train_step(self, lr, hr):
         with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
             lr = tf.cast(lr, tf.float32)
@@ -286,9 +270,27 @@ class SXESrganTrainer:
         hr_features = self.vgg(hr) / 12.75
         return self.mean_squared_error(hr_features, sr_features)
         # return self.mean_absolute_error(hr_features, sr_features)
+    
+    def _lpips_loss(self, hr, sr):
+        
+        sr = tf.transpose(sr,[0,3,1,2])
+        hr = tf.transpose(hr,[0,3,1,2])
+        
+        # Calculate LPIPS Similarity
+        loss = self.loss_fn_alex.forward(torch.Tensor(hr.numpy()),
+                                            torch.Tensor(sr.numpy()))
+
+        loss = loss.detach().numpy()
+
+        loss = tf.reshape(tf.math.reduce_mean(loss),[])
+
+        return loss
 
     def _pixelwise_loss(self, hr, sr):
-        return self.mean_absolute_error(hr, sr)
+        if(self.loss_type == 'pixel'):
+            return self.mean_absolute_error(hr, sr)
+        else:
+            return self._lpips_loss(hr, sr)
 
     def _generator_loss(self, hr_out, sr_out):
         sigma = tf.sigmoid
@@ -300,19 +302,18 @@ class SXESrganTrainer:
         # return self.binary_cross_entropy(tf.ones_like(sr_out), sr_out)
 
     def _discriminator_loss(self, hr_out, sr_out):
-        sigma = tf.sigmoid
-        hr_loss = sigma(hr_out - tf.reduce_mean(sr_out))
-        sr_loss = sigma(sr_out - tf.reduce_mean(hr_out))
-
-        return 0.5 * (self.binary_cross_entropy(tf.ones_like(hr_loss), hr_loss) + self.binary_cross_entropy(tf.zeros_like(sr_loss), sr_loss))
         
+        sigma = tf.sigmoid
+        if(self.disc == 'ragan'):
+            
+            hr_loss = sigma(hr_out - tf.reduce_mean(sr_out))
+            sr_loss = sigma(sr_out - tf.reduce_mean(hr_out))
 
-    # def _discriminator_loss_ragan(self, real_discriminator_logits, fake_discriminator_logits):
-    #     sigma = tf.sigmoid
-    #     real_logits = sigma(real_discriminator_logits -
-    #                         tf.reduce_mean(fake_discriminator_logits))
-    #     fake_logits = sigma(fake_discriminator_logits -
-    #                         tf.reduce_mean(real_discriminator_logits))
-    #     return 0.5 * (
-    #         self.binary_cross_entropy(tf.ones_like(real_logits), real_logits) +
-    #         self.binary_cross_entropy(tf.zeros_like(fake_logits), fake_logits))
+            return 0.5 * (self.binary_cross_entropy(tf.ones_like(hr_loss), hr_loss) + self.binary_cross_entropy(tf.zeros_like(sr_loss), sr_loss))
+        
+        else:
+            
+            hr_loss = self.binary_cross_entropy(tf.ones_like(hr_out), sigma(hr_out))
+            sr_loss = self.binary_cross_entropy(tf.zeros_like(sr_out), sigma(sr_out))
+            
+            return hr_loss + sr_loss 
